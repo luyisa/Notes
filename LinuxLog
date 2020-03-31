@@ -1,0 +1,12 @@
+anacorn: 
+    如果你的服务器并非是 7x24 小时的运行，定时任务的执行时间可能刚好在服务器关闭期间，这个时候可以anacron就派上用场了
+    https://www.jianshu.com/p/c44e7d79096e
+cron: 
+    cron服务器可以根据配置文件约定的时间来执行特定的任务。
+run-parts:
+    执行目录下所有脚本
+AIDE：
+    Advanced Intrusion Detection Environment is an open source host based file and directory integrity checker.system checking https://blog.rapid7.com/2017/06/30/how-to-install-and-configure-aide-on-ubuntu-linux/
+rsyslog：
+    https://www.jianshu.com/p/b969b3647497
+    http://www.361way.com/rsyslog-config/6250.html
