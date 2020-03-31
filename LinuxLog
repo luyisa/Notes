@@ -10,3 +10,7 @@ AIDE：
 rsyslog：
     https://www.jianshu.com/p/b969b3647497
     http://www.361way.com/rsyslog-config/6250.html
+
+logrotate:
+    系统运维中做日志自动化截断和管理的
+    https://linux.cn/article-4126-1.html
