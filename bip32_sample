@@ -1,0 +1,407 @@
+```
+    /*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package examples
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"testing"
+
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
+
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
+
+	"github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/ep11"
+	pb "github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/grpc"
+	"github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/util"
+	grpc "google.golang.org/grpc"
+)
+
+// The following IBM Cloud items need to be changed prior to running the sample program
+//const address = "<grep11_server_address>:<port>"
+// const address = "129.34.32.66:9870"
+
+// var callOpts = []grpc.DialOption{
+// 	grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})),
+// 	grpc.WithPerRPCCredentials(&util.IAMPerRPCCredentials{
+// 		APIKey:   "sCKbcjcvFJ1oWrXUbehEU1NELfV1Wlj5HYzBWueZL_JE",
+// 		Endpoint: "https://iam.cloud.ibm.com",
+// 		Instance: "0c10a32a-77f3-4b7e-8f19-247c76581260",
+// 	}),
+// }
+
+//Test_BIP32
+//Flow: generate 256 random seed - secp256k1 => generate master node => derive master key m => derive wallet account key m/0
+// => derive wallet chain keypair m/0/0 => derive address key m/0/0/0 => sign/verify ECDSA
+func Test_BIP32_Base(t *testing.T) {
+	conn, err := grpc.Dial(address, callOpts...)
+	if err != nil {
+		panic(fmt.Errorf("Could not connect to server: %s", err))
+	}
+	defer conn.Close()
+	cryptoClient := pb.NewCryptoClient(conn)
+
+	fmt.Printf("Generating random seed key...\n")
+	generateKeyRequest := &pb.GenerateKeyRequest{
+		Mech: &pb.Mechanism{Mechanism: ep11.CKM_GENERIC_SECRET_KEY_GEN},
+		TemplateBytes: util.NewAttributeMap(
+			util.NewAttribute(ep11.CKA_KEY_TYPE, ep11.CKK_GENERIC_SECRET),
+			util.NewAttribute(ep11.CKA_CLASS, ep11.CKO_SECRET_KEY),
+			util.NewAttribute(ep11.CKA_VALUE_LEN, (uint64)(256/8)),
+			util.NewAttribute(ep11.CKA_WRAP, false),
+			util.NewAttribute(ep11.CKA_UNWRAP, false),
+			util.NewAttribute(ep11.CKA_SIGN, true),
+			util.NewAttribute(ep11.CKA_VERIFY, true),
+			util.NewAttribute(ep11.CKA_EXTRACTABLE, false),
+			util.NewAttribute(ep11.CKA_DERIVE, true),
+			util.NewAttribute(ep11.CKA_IBM_USE_AS_DATA, true),
+		),
+	}
+	generateKeyResponse, err := cryptoClient.GenerateKey(context.Background(), generateKeyRequest)
+	if err != nil {
+		panic(fmt.Errorf("Generated Generic Secret Key error: %+v %s", generateKeyRequest, err))
+	}
+
+	fmt.Println("Depth0: Generating master key and master chaincode...")
+	masterSecretKey, masterChainCode := bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032MASTERK,
+		0,
+		generateKeyResponse.Key,
+		nil,
+	)
+	fmt.Println("Depth0: Generate master key from random seed and master chaincode")
+
+	fmt.Println("Depth1: Generating Wallets accounts...")
+	const max_depth = 3
+	const max_child = 1
+	var privateKey [max_depth][max_child][]byte
+	var privateChainCode [max_depth][max_child][]byte
+	var publicKey [max_depth][max_child][]byte
+	var publicChainCode [max_depth][max_child][]byte
+	var child, depth uint64
+
+	privateKey[0][0], privateChainCode[0][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PRV,
+		0,
+		masterSecretKey,
+		masterChainCode,
+	)
+	publicKey[0][0], publicChainCode[0][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PUB,
+		0,
+		masterSecretKey,
+		masterChainCode,
+	)
+	fmt.Printf("Depth1: Generated extenal Wallet accout: %v \n ", hex.EncodeToString(publicKey[0][child]))
+	fmt.Printf("Depth1: Generated internal Wallet accout: %v \n ", hex.EncodeToString(privateKey[0][child]))
+	fmt.Println("Depth1: Generated extenal and internal Wallet accout")
+
+	fmt.Println("Depth2: Generating Wallets chains...")
+
+	privateKey[1][0], privateChainCode[1][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PRV,
+		0,
+		privateKey[0][0],
+		privateChainCode[0][0],
+	)
+	publicKey[1][0], publicChainCode[1][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PUB,
+		0,
+		privateKey[0][0],
+		privateChainCode[0][0],
+	)
+	fmt.Printf("Depth2: Generated external wallet chain: %v\n", hex.EncodeToString(publicKey[1][0]))
+	fmt.Printf("Depth2: Generated internal wallet chain: %v\n", hex.EncodeToString(privateKey[1][0]))
+	fmt.Println("Depth2: Generated internal and external wallet chain successfully")
+
+	fmt.Println("Depth3: Generating Wallets addresses...")
+	privateKey[2][0], privateChainCode[2][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PRV,
+		0,
+		privateKey[1][0],
+		privateChainCode[1][0],
+	)
+	publicKey[2][0], publicChainCode[2][0] = bip32_deriveKey(
+		cryptoClient,
+		pb.BTCDeriveParm_CkBIP0032PRV2PUB,
+		0,
+		privateKey[1][0],
+		privateChainCode[1][0],
+	)
+
+	fmt.Printf("Depth3: Generated internal addresses: %v\n", hex.EncodeToString(privateKey[2][0]))
+	fmt.Printf("Depth3: Generated external addresses: %v\n", hex.EncodeToString(publicKey[2][0]))
+	fmt.Println("Depth3: Generated external and internal addresses successfully.")
+
+	fmt.Println("Sign and verified...")
+	for depth = 0; depth < max_depth; depth++ {
+		for child = 0; child < max_child; child++ {
+			bip32_signAndVerifySingle(cryptoClient, privateKey[depth][child], publicKey[depth][child])
+		}
+	}
+}
+
+func Test_BIP32_Transaction(t *testing.T) {
+	conn, err := grpc.Dial(address, callOpts...)
+	if err != nil {
+		panic(fmt.Errorf("Could not connect to server: %s", err))
+	}
+	defer conn.Close()
+	cryptoClient := pb.NewCryptoClient(conn)
+
+	// pubKey_hex := "3056301006072a8648ce3d020106052b8104000a03420004b9c69fbebae353275aebd8a973cfcff52c21d33e24b511d9c4f6f154cae114ea5d6595a04d666584e13dd9bec205155b926996f5cf5eaca3994dc6548341af350410ffff000100009f01a6fe48d3e2cdb846042000000000000000000000000000000000000000000000000000000000000000000408056d39b8c34add150408000000000000000104241003000000409d8600409d868001000a000000010000010000000003000001610000000004202ca7ff30fa5b181950b2861a657e648c938b99bd548a2ab24a125bec4e9d8e90"
+	// priKey_hex := "0000000000000000000000000000000000000000000000000000000000000000ffff000100009f01a6fe48d3e2cdb8460000000000409d8600000000000000011234a2a1659c3b5200cbb8ceeb02bf0e88aeebf77dca5ca946d76e8fe942b95cc9de129f88fd01a5c22858e69feeaa519a4a1b43f448d20030e000f2211d70e5c31f88ba24d796c834b7ea9018ab8e82aa59b853f3d9c2bd166cfa0fd05ea8a7915e7fd1f24204d99acb6636512bcbfe866fb4740ee886b3c94723bd4a2d20d6fd10eacb8159997d72c601b77c446a40f83fdd0f102e163c1f5d790438b5759d9f8d84f623587dd93a19b56aba75e5aeef21381e562c40557187a8c1660d313c00520ee2f0bb35b6bb5e6de36e3bb521a78d134ed3d72758df3136677c7927a0118bbb7b7c17902bd7564a1abe461938c71e5c306c6d857b8b6a90e0ffec0c22d6309682eb20b84c4b4e8b60a19af2a914f755080047d1476c009a06ef261776becb6c4edfefcd512e24db8b5fb8014fee36bd5e2d311c1fd38741feacbdb891c54458397e5619616962d43f3df8f6d2c1e26405ec749fea1918caa4bd1c4210e7b5ab57470a2e1013ef812aa4272617de776f9016df05632dfde0d5d64de82d325a25c94c0e87cf534e3484e51adb2bbbabb338ec435d5b746bc0a5be564369cd773ba5612bf7fcfff49ad7be9f97de4425c2fc7f3efdf472edf9ba15d4e66fd834dab8a59d92f9f2f5610dde8c63e20d0fe29293bf48c11af81f8127f45b4e098607b3d385f012e6064f905b700f728fd31f4b2beb31922b8a6643775cb64d05249d98cc9bdb2b2df0c9b86b96270629cb5b2a11d34177ddcdc836b478e05b9ff72d0d8c91e2c8eca68dea78f49cff9ec458fb78065b2ad82d761650e237b5"
+	priKey_hex := "0000000000000000000000000000000000000000000000000000000000000000eeee000100007cd826a74a9bd29239b70000000000409d860000000000000001123487136a936ae2f12c65a8bedc2b6360115a2275fa7e8a55475fec87205f016deb167e643308a6eaffe7d040c9b0e18ed9fb08956fe75ca9227d42e538df1e31ff4499e06001c5c647600b33ee302277be5caa55fe2932637abf0ead042d7bf486f298be3834b2a42134e3e7d52a8b13e745246177371062440ebfdd33244fa516a81fa33937c19a2e5b81b698581968cd6821c40e2b54569df238965bc4bef43711ddd62eb97f13e5b165e119ae3249c2ad596720334c4490fd698156a4a0b3e7801a5dc5cc95fe116d046474da11ab6911b48b28351bb78e068a561a49b7681cea1da9043993b473c92500ade8105e83d854d022aadda310ed08224e7f86373baa8a5ba1b2fbd8862c08d311e85c827555d8ea4c6a25c9a1ceeb2d2c0d1ac4859cb3afe95eb7dd5be5c1af4e2ff0fbda1ff3699e481affc11422a2ffa11c26ef66a2766a51ce25044bc65e5982c2ad1a96fb1f8b8814c47864f87692178155110d4994e753c49a69f5ce5895b10706991056a3d0c922a01421ac8366054085a4d6d6fc01a8d67e0845025d86dd40df25887706d0332089c0a492b61dd0dcdf5550ea909037bfc77ea8bfdde13b9b95d736d851c2964d8f62eb4d27d6c104aa08510c4d4e219f34c6d371fa6d7137521ade379a12b8bfd190aec93a4b2d439e08407791be7c1e756f5ed48dd1e86b5c79fcdb152a23ebd125c214f5091e100becc0a6201bdecf8d96992f9cf30508ee103a19d0bc8ae5e51a67f841d014bfdc744c512f5c4788b05eb551fa1214aab96dcb3a62f93ffcec225a21e8e6f2d6"
+	pubKey_hex := "3056301006072a8648ce3d020106052b8104000a0342000448d54c8d1a85a60516f9f606f9c486f46bf541b39d173f8af30abb27de766d706822d666262f977412f0ecdbf0003cb2318dbda68369518e702996a513a439d20410eeee000100007cd826a74a9bd29239b7042000000000000000000000000000000000000000000000000000000000000000000408bf1dfe086269f56e0408000000000000000104241003000000409d8600409d868001000a00000001000001000000000300000161000000000420c776d3d0eaf6a2c34fbd401104be6733e5712a848cd1fb50a7e6e92dd4997cfc"
+
+	pubKey_b, err := hex.DecodeString(pubKey_hex)
+
+	var balance int64 = 100000    // 余额
+	var fee int64 = 0.00001 * 1e8 // 交易费
+	var leftToMe = balance - fee  // 余额-交易费就是剩下再给我的
+
+	if err != nil {
+		panic(fmt.Errorf("Failed to decode hex public key: %s", err))
+	} else {
+		var pubKey_c []byte
+		pubKey_c, err = util.GetBitcoinPubKey(pubKey_b)
+		if err != nil {
+			panic(fmt.Errorf("Failed to decode public key: %s", err))
+		} else {
+			fmt.Printf("Successed to get public key by curve: %v\n.", hex.EncodeToString(pubKey_c))
+			//decode publicKey to get public key
+			//get wallet address for testnet coin network
+			pubKey, err := btcec.ParsePubKey(pubKey_c, btcec.S256())
+			if err != nil {
+				panic(fmt.Errorf("Failed to parse public key: %s \n", err))
+			}
+
+			//TODO remove this log
+			fmt.Printf("parse public key %v \n", pubKey)
+			pubKeySerial := pubKey.SerializeUncompressed()
+			pubKeyAddress, _ := btcutil.NewAddressPubKey(pubKeySerial, &chaincfg.TestNet3Params)
+			dd := pubKeyAddress.EncodeAddress()
+			fmt.Printf("Address on bitcoin wallet: %v\n", dd)
+
+			// priKey, _err := hex.DecodeString(priKey_hex)
+
+			//create one transaction, 0.001 BTC
+			//a = btcutil.Amount(1e5)
+			originTx := wire.NewMsgTx(wire.TxVersion)
+
+			//tx in
+			prevTxHash := "6256f14f17e375850cea709434f53a443aad78241f17ae016f3e3994eef031d1"
+			prePKscriptHex := "76a914736fbf50c3b902f73ac4faef3c8f1b7eb3d1c1d088ac"
+			// prevTxHash := "ac19b19c5bb719bd165e30c331647f66832e5ac36bc86c10f2bf6b3bded0de8c"
+			// prePKscriptHex := "76a91496cfa48f643af9c55bfdc091e85f4af7534e39a988ac"
+			prevPkScript, _ := hex.DecodeString(prePKscriptHex)
+			prevPkScripts := make([][]byte, 1)
+			prevPkScripts[0] = prevPkScript
+			fmt.Printf("prePKscriptHex -- %s\n", prePKscriptHex)
+
+			hash, _ := chainhash.NewHashFromStr(prevTxHash)
+			prevOut := wire.NewOutPoint(hash, uint32(0))
+			txIn := wire.NewTxIn(prevOut, []byte{txscript.OP_0, txscript.OP_0}, nil)
+			originTx.AddTxIn(txIn)
+
+			//tx output
+			dd = "mr3KsTLPYBzC52z67SV2cxZ9Z9M4kamZGm"
+			addr, _ := btcutil.DecodeAddress(dd, &chaincfg.TestNet3Params)
+			destinationPkScript, err := txscript.PayToAddrScript(addr)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			txOut := wire.NewTxOut(leftToMe, destinationPkScript)
+			originTx.AddTxOut(txOut)
+			fmt.Printf("txOut --- %v \n", txOut)
+
+			// 3. 签名
+			sign(t, cryptoClient, originTx, priKey_hex, pubKey, prevPkScripts)
+
+			// 4. 输出Hex
+			buf := bytes.NewBuffer(make([]byte, 0, originTx.SerializeSize()))
+			if err := originTx.Serialize(buf); err != nil {
+			}
+			txHex := hex.EncodeToString(buf.Bytes())
+			fmt.Printf("hex -- %s", txHex)
+		}
+	}
+
+	// priKey, _err := hex.DecodeString(priKey_hex)
+
+	//create one transaction, 0.001 BTC
+	//a = btcutil.Amount(1e5)
+
+	/**
+	* normal transaction process
+	 */
+
+	// originTx := wire.NewMsgTx(wire.TxVersion)
+
+	// //tx in
+	// prevTxHash := "6256f14f17e375850cea709434f53a443aad78241f17ae016f3e3994eef031d1"
+	// prePKscriptHex := "76a914736fbf50c3b902f73ac4faef3c8f1b7eb3d1c1d088ac"
+	// hash, _ := chainhash.NewHashFromStr(prevTxHash)
+	// prevOut := wire.NewOutPoint(hash, uint32(0))
+	// txIn := wire.NewTxIn(prevOut, []byte{txscript.OP_0, txscript.OP_0}, nil)
+	// originTx.AddTxIn(txIn)
+
+	// //tx output
+	// destinationPkScript, err := txscript.PayToAddrScript(pubKeyAddress)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// txOut := wire.NewTxOut(100000, destinationPkScript)
+	// originTx.AddTxOut(txOut)
+
+	/**
+	 */
+
+	// // Sign the transaction.
+	// lookupKey := func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+	// 	return priv_ecdsa, true, nil
+	// }
+
+	// sigScript, err := txscript.SignTxOutput(&chaincfg.MainNetParams,
+	// 	originTx, 0, destinationPkScript, txscript.SigHashAll, txscript.KeyClosure(lookupKey), nil, nil)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// originTx.TxIn[0].SignatureScript = sigScript
+	// fmt.Printf("signature -- %v\n", sigScript)
+
+	// flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures | txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	// vm, err := txscript.NewEngine(destinationPkScript, originTx, 0, flags, nil, nil, -1)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// if err := vm.Execute(); err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// fmt.Println("Transaction successfully signed")
+
+	// // Sign a message using the private key.
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+}
+
+func sign(t *testing.T, cryptoClient pb.CryptoClient, tx *wire.MsgTx, privKeyStr string, pubKey *btcec.PublicKey, prevPkScripts [][]byte) {
+	inputs := tx.TxIn
+	for i := range inputs {
+		pkScript := prevPkScripts[i]
+		var script []byte
+		script, _ = signatureScript(t, cryptoClient, tx, i, pkScript, txscript.SigHashAll, privKeyStr, pubKey, false)
+		inputs[i].SignatureScript = script
+		scriptSig := hex.EncodeToString(script)
+		t.Log(scriptSig)
+	}
+}
+func signatureScript(t *testing.T, cryptoClient pb.CryptoClient, tx *wire.MsgTx, idx int, subscript []byte, hashType txscript.SigHashType, privKeyStr string, pubKey *btcec.PublicKey, compress bool) ([]byte, error) {
+	// sig, err := RawTxInSignature(tx, idx, subscript, hashType, privKey)
+	hash, err := txscript.CalcSignatureHash(subscript, hashType, tx, idx)
+	if err != nil {
+		t.Logf("calc hash error %s", err)
+		return nil, err
+	}
+	datahex := hex.EncodeToString(hash)
+	t.Log(datahex)
+	t.Log(privKeyStr)
+	privateKey, _ := hex.DecodeString(privKeyStr)
+	signSingleRequest := &pb.SignSingleRequest{
+		Mech:    &pb.Mechanism{Mechanism: ep11.CKM_ECDSA},
+		PrivKey: privateKey,
+		Data:    hash,
+	}
+	signSingleResponse, err := cryptoClient.SignSingle(context.Background(), signSingleRequest)
+	if err != nil {
+		t.Errorf("SignSingle error: %s", err)
+	} else {
+		t.Log("Data signed")
+	}
+	halflen := len(signSingleResponse.Signature) / 2
+	t.Log(halflen)
+	rraw := signSingleResponse.Signature[:halflen]
+	sraw := signSingleResponse.Signature[halflen:]
+	r := new(big.Int).SetBytes(rraw)
+	s := new(big.Int).SetBytes(sraw)
+	signature := &btcec.Signature{R: r, S: s}
+	verify := signature.Verify(hash, pubKey)
+	t.Log(verify)
+	sigser := signature.Serialize()
+	sig := append(sigser, byte(hashType))
+	sigHex := hex.EncodeToString(sig)
+	t.Log(sigHex)
+	pk := pubKey
+	var pkData []byte
+	if compress {
+		pkData = pk.SerializeCompressed()
+	} else {
+		pkData = pk.SerializeUncompressed()
+	}
+	return txscript.NewScriptBuilder().AddData(sig).AddData(pkData).Script()
+}
+
+func Test_BIP32_Address(t *testing.T) {
+	conn, err := grpc.Dial(address, callOpts...)
+	if err != nil {
+		panic(fmt.Errorf("Could not connect to server: %s", err))
+	}
+	defer conn.Close()
+
+	// pubKey_hex := "3056301006072a8648ce3d020106052b8104000a03420004b9c69fbebae353275aebd8a973cfcff52c21d33e24b511d9c4f6f154cae114ea5d6595a04d666584e13dd9bec205155b926996f5cf5eaca3994dc6548341af350410ffff000100009f01a6fe48d3e2cdb846042000000000000000000000000000000000000000000000000000000000000000000408056d39b8c34add150408000000000000000104241003000000409d8600409d868001000a000000010000010000000003000001610000000004202ca7ff30fa5b181950b2861a657e648c938b99bd548a2ab24a125bec4e9d8e90"
+	// priKey_hex := "0000000000000000000000000000000000000000000000000000000000000000ffff000100009f01a6fe48d3e2cdb8460000000000409d8600000000000000011234a2a1659c3b5200cbb8ceeb02bf0e88aeebf77dca5ca946d76e8fe942b95cc9de129f88fd01a5c22858e69feeaa519a4a1b43f448d20030e000f2211d70e5c31f88ba24d796c834b7ea9018ab8e82aa59b853f3d9c2bd166cfa0fd05ea8a7915e7fd1f24204d99acb6636512bcbfe866fb4740ee886b3c94723bd4a2d20d6fd10eacb8159997d72c601b77c446a40f83fdd0f102e163c1f5d790438b5759d9f8d84f623587dd93a19b56aba75e5aeef21381e562c40557187a8c1660d313c00520ee2f0bb35b6bb5e6de36e3bb521a78d134ed3d72758df3136677c7927a0118bbb7b7c17902bd7564a1abe461938c71e5c306c6d857b8b6a90e0ffec0c22d6309682eb20b84c4b4e8b60a19af2a914f755080047d1476c009a06ef261776becb6c4edfefcd512e24db8b5fb8014fee36bd5e2d311c1fd38741feacbdb891c54458397e5619616962d43f3df8f6d2c1e26405ec749fea1918caa4bd1c4210e7b5ab57470a2e1013ef812aa4272617de776f9016df05632dfde0d5d64de82d325a25c94c0e87cf534e3484e51adb2bbbabb338ec435d5b746bc0a5be564369cd773ba5612bf7fcfff49ad7be9f97de4425c2fc7f3efdf472edf9ba15d4e66fd834dab8a59d92f9f2f5610dde8c63e20d0fe29293bf48c11af81f8127f45b4e098607b3d385f012e6064f905b700f728fd31f4b2beb31922b8a6643775cb64d05249d98cc9bdb2b2df0c9b86b96270629cb5b2a11d34177ddcdc836b478e05b9ff72d0d8c91e2c8eca68dea78f49cff9ec458fb78065b2ad82d761650e237b5"
+	pubKey_hex := "3056301006072a8648ce3d020106052b8104000a0342000448d54c8d1a85a60516f9f606f9c486f46bf541b39d173f8af30abb27de766d706822d666262f977412f0ecdbf0003cb2318dbda68369518e702996a513a439d20410eeee000100007cd826a74a9bd29239b7042000000000000000000000000000000000000000000000000000000000000000000408bf1dfe086269f56e0408000000000000000104241003000000409d8600409d868001000a00000001000001000000000300000161000000000420c776d3d0eaf6a2c34fbd401104be6733e5712a848cd1fb50a7e6e92dd4997cfc"
+
+	pubKey_b, err := hex.DecodeString(pubKey_hex)
+
+	if err != nil {
+		panic(fmt.Errorf("Failed to decode hex public key: %s", err))
+	} else {
+		var pubKey_c []byte
+		pubKey_c, err = util.GetBitcoinPubKey(pubKey_b)
+		if err != nil {
+			panic(fmt.Errorf("Failed to decode public key: %s", err))
+		} else {
+			fmt.Printf("Successed to get public key by curve: %v\n.", hex.EncodeToString(pubKey_c))
+			//decode publicKey to get public key
+			//get wallet address for testnet coin network
+			pubKey, err := btcec.ParsePubKey(pubKey_c, btcec.S256())
+			if err != nil {
+				panic(fmt.Errorf("Failed to parse public key: %s \n", err))
+			}
+
+			//TODO remove this log
+			fmt.Printf("parse public key %v \n", pubKey)
+			pubKeySerial := pubKey.SerializeUncompressed()
+			pubKeyAddress, _ := btcutil.NewAddressPubKey(pubKeySerial, &chaincfg.TestNet3Params)
+			dd := pubKeyAddress.EncodeAddress()
+			fmt.Printf("Address on bitcoin wallet: %v\n", dd)
+		}
+	}
+}
+```
