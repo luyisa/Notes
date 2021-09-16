@@ -1,4 +1,4 @@
-<h1> Support concurrent - HashMap </h1>
+<h1> Support concurrent and lock </h1>
 并发和锁相关的知识和思考  2021.9.16
 
 > 对普通map加读写锁保护
