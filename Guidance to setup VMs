@@ -1,0 +1,448 @@
+## Guidance to setup VMs
+
+### SSH to dev-intel3 to create vms
+```
+ssh <user_id>@bb-devintel2.redlab.datadirectnet.com
+```
+
+** Note:
+
+You can make it as passwordless with configuration into `~/.ssh/authorized_keys` and `~/.ssh/config`.
+
+### How to get installation build
+Two types of build:
+    * Engineering
+    * Production
+
+You can fetch the location (shared resource) of engineering build from Workflow `nightly-release-bare-metal-engineering-workflow` in `red` repository by <a>https://github.red.datadirectnet.com/red/red/actions/runs/3900178/job/6115350</a>, under `Build Release containers` - `Create red/build`, you can find out the output directory like `/gha/red/release_build/e22e237c-engr_3900178-1416/git/red-pkgs`
+
+Under this directory, you should find following debs:
+```
+llu@llu-client-1:~$ ls -al /gha/red/release_build/e22e237c-engr_3900178-1416/git/red-pkgs/ubuntu/24.04/pkgs/
+total 405780
+drwxrwxrwx+ 2 redjenkins 543029133        10 Apr 29 05:26 .
+drwxrwxrwx+ 4 redjenkins 543029133         4 Apr 29 01:13 ..
+-rw-r--r--  1 redjenkins 543029133  49645352 Apr 29 01:16 redcli_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133 187919496 Apr 29 01:16 red-client-common_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133     78628 Apr 29 01:16 red-client-dev_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133   1452156 Apr 29 01:16 red-client-fs_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133    112288 Apr 29 01:16 red-client-fs-dkms_0.0.11_all.deb
+-rw-r--r--  1 redjenkins 543029133  95246960 Apr 29 01:16 red-client-tools_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133  80339148 Apr 29 01:16 redsetup_2.2.0-beta.23094_amd64-engr.deb
+-rwxrwxrwx  1 redjenkins 543029133        17 Apr 29 01:25 RELEASE_VERSION_amd64.txt
+```
+
+### Setup agent and client
+
+
+#### 1. create different vms for agent and client vm
+```
+kubert create -m qa-testbox-amd64 ${USER}-dev
+kubert create -m red-ready-amd64-u24 ${USER}-agent-1
+kubert create -m qa-testbox-amd64 ${USER}-client-1
+```
+
+** Note:
+vm names can be renamed.
+
+After finishing, you should get following info:
+`kubert list`
+
+```
+INFO[2025-04-29 05:19:54:54] List is scoped to a single rack               rack=dev-intel3
++--------------+---------------------+-----------------------------+--------+------------------+---------+-------+----------+-------------------------------------------------------+--------------+----------------+----------------+-----------+
+|     NAME     |        MODEL        |         RACK / HOST         |  ARCH  | CPU / MEM / ROOT | STATUS  | OWNER |  KERNEL  |                         FQDN                          |    DDN IP    |     IB ETH     |  INTERNAL IP   | SSH READY |
++--------------+---------------------+-----------------------------+--------+------------------+---------+-------+----------+-------------------------------------------------------+--------------+----------------+----------------+-----------+
+| llu-agent-1  | red-ready-amd64-u24 | dev-intel3 / tyan-b8058-1-1 | x86_64 | 6 / 16Gi / 150Gi | Running | llu   | 6.8.0-55 | llu-agent-1.virts.devintel3.redlab.datadirectnet.com  | 10.25.96.253 | 172.25.96.253  | 250.48.252.238 | true      |
+| llu-client-1 | qa-testbox-amd64    | dev-intel3 / tyan-b8058-1-3 | x86_64 | 4 / 8Gi / 100Gi  | Running | llu   | 6.8.0-58 | llu-client-1.virts.devintel3.redlab.datadirectnet.com | 10.25.96.254 | 172.25.96.254  | 250.48.85.234  | true      |
+| llu-dev      | qa-testbox-amd64    | dev-intel3 / tyan-b8058-1-2 | x86_64 | 4 / 8Gi / 100Gi  | Running | llu   | 6.8.0-58 | llu-dev.virts.devintel3.redlab.datadirectnet.com      | 10.25.96.252 | 172.25.96.252  |
+```
+
+#### 2. config client vm
+ssh to client vm:
+```
+ssh 10.25.96.254
+
+```
+please install following debs on client side:
+
+```
+-rw-r--r--  1 redjenkins 543029133  49645352 Apr 29 01:16 redcli_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133 187919496 Apr 29 01:16 red-client-common_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133     78628 Apr 29 01:16 red-client-dev_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133   1452156 Apr 29 01:16 red-client-fs_2.2.0-beta.23094_amd64-engr.deb
+-rw-r--r--  1 redjenkins 543029133    112288 Apr 29 01:16 red-client-fs-dkms_0.0.11_all.deb
+-rw-r--r--  1 redjenkins 543029133  95246960 Apr 29 01:16 red-client-tools_2.2.0-beta.23094_amd64-engr.deb
+```
+by commands:
+```
+sudo apt install -y /gha/red/release_build/e22e237c-engr_3900178-1416/git/red-pkgs/ubuntu/24.04/pkgs/<deb package name>
+```
+**Note:
+1. Should use `sudo`
+2. Should provide full path name
+Machine-Owner Key (MOK)
+
+#### 3. config agent vm
+ssh to agent vm:
+```
+ssh 10.25.96.253
+```
+please install following debs on agent side:
+```
+-rw-r--r--  1 redjenkins 543029133  80339148 Apr 29 01:16 redsetup_2.2.0-beta.23094_amd64-engr.deb
+```
+by command:
+```
+sudo apt install -y /gha/red/release_build/e22e237c-engr_3900178-1416/git/red-pkgs/ubuntu/24.04/pkgs/redsetup_2.2.0-beta.23094_amd64-engr.deb
+```
+
+After installation, following containers will be launched up:
+```
+llu@llu-agent-1:~$ docker ps
+CONTAINER ID   IMAGE                                   COMMAND                  CREATED       STATUS       PORTS                                                                                 NAMES
+f6b7155dbb0e   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         redapi-redapi-1
+dab89b4ad06a   red/nodeexp:1.0.0_amd64                 "/bin/node_exporter …"   2 hours ago   Up 2 hours                                                                                         nodeexp-nodeexp-1
+35d39d301b16   red/nameserver:1.0.0_amd64              "/coredns"               2 hours ago   Up 2 hours   250.48.252.238:53->53/tcp, 250.48.252.238:9153->9153/tcp, 250.48.252.238:53->53/udp   nameserver-nameserver-1
+cd35b144a977   red/telemetry:1.0.0_amd64               "/otelcol-contrib --…"   2 hours ago   Up 2 hours                                                                                         telemetry-telemetry-1
+b07e8ac3578c   red/healthdb:1.0.0_amd64                "docker-entrypoint.s…"   2 hours ago   Up 2 hours                                                                                         healthdb-healthdb-1
+09e2804d9854   red/message:1.0.0_amd64                 "/nats-server --conf…"   2 hours ago   Up 2 hours                                                                                         redstream-redstream-1
+ab46ed87580c   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         redalert-redalert-1
+d0d7302ef4a9   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         redforwarder-redforwarder-1
+102d6fb9860f   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         reds3-reds3-1
+5da0f57ead01   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         hmi-hmi-1
+df6d16760c0b   red/redui:2.2.0-beta.23094_amd64-engr   "nginx -g 'daemon of…"   2 hours ago   Up 2 hours                                                                                         redui-redui-1
+f964671021a0   red/metrics:1.0.0_amd64                 "/entrypoint.sh infl…"   2 hours ago   Up 2 hours                                                                                         tsdb-tsdb-1
+42b9276e0174   red/core:2.2.0-beta.23094_amd64-engr    "/usr/bin/dumb-init …"   2 hours ago   Up 2 hours                                                                                         redagent-redagent-1
+d21443a5bdb3   red/config:1.0.0_amd64                  "/usr/local/bin/etcd"    2 hours ago   Up 2 hours                                                                                         etcd-etcd-1
+7f6f7ed42b2e   red/proxy:1.0.0_amd64                   "/docker-entrypoint.…"   2 hours ago   Up 2 hours                                                                                         proxy-rproxy-1
+4d2ab9e2f961   red/images:1.0.0_amd64                  "/entrypoint.sh /etc…"   2 hours ago   Up 2 hours                                                                                         registry-rregistry-1
+```
+
+### 4. setup connection between client and agent
+Export parameters of agent on client vm:
+```
+ssh <client vm ip>
+export REDCLI_SERVER="https://10.25.96.253:443/redapi/v1"
+export RED_USER=realm_admin
+export RED_SERVER="10.25.96.253"
+redcli user login realm_admin -p Adminpassword
+```
+
+**Note:
+    1. 10.25.x.x is external ip, you also can use internal ip with '250.48.x.x'
+    2. You can visit the `REDCLI_SERVER` by web browser with `realm_admin` & `Adminpassword`, that's direct to Monitoring Dashboard.
+
+Use following commands to setup config:
+```
+redcli tenant create test
+redcli subtenant create test
+redcli user grant realm_admin test
+redcli user grant realm_admin test/test
+sudo usermod -a -G red <user_id>
+redcli client setup -t test
+source ~/.config/red/redrc
+```
+
+Check env configs by command:
+```
+env|grep RED
+
+RED_ADMIN_CERTIFICATE=/home/llu/.config/red/certs/jrpc_admin_cert.pem
+RED_TLS_SERVER_CERTIFICATE=/home/llu/.config/red/certs/jrpc_server.crt
+RED_TENANT=test/test
+RED_CLUSTER=cluster1
+RED_HOSTUUID=902af463-fdc2-4ae0-b876-e312020298e0
+REDCLI_SERVER=250.48.252.238
+RED_DIR=/opt/ddn/red
+RED_LOGDIR=/var/log/red
+RED_USER=51959ce8-dfc9-471e-98f8-834f9aac41d1
+RED_SERVER=250.48.252.238
+RED_CERTIFICATES_PATH=/home/llu/.config/red/certs
+RED_CLIENT_CERTIFICATE=/home/llu/.config/red/certs/jrpc_service_cert.pem
+```
+
+create dataset
+```
+redcli dataset create testd
+redcli dataset show testd
+```
+
+Do following actions to mount dataset:
+```
+sudo umount /mnt/testd
+sudo mkdir -p /mnt/testd && sudo chmod a+rw /mnt/testd
+sudo chown -R llu:llu /var/log/red
+sudo chown -R llu:llu ~/.config/red
+sudo usermod -aG red root
+```
+
+Configuration process:
+```
+sudo openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=<user_id>/
+ls /lib/modules/   ---> check kernel version of your current system
+sudo zstd -d /lib/modules/6.8.0-58-generic/updates/dkms/redfs.ko.zst   ---> unzip redfs ko
+sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der /lib/modules/6.8.0-58-generic/updates/dkms/redfs.ko
+sudo mokutil --import MOK.der  ---> register redfs signed certificate into MOK, input password for following configuration
+sudo -E redcli --server 10.25.96.253 client setup -F posix-system
+```
+
+Restart and config MOK of client:
+
+```
+kubert console -i llu-client-1 (name of your client vm)
+reboot the client vm
+<GUI screen would display, input the password you set in above step, config step by step on the GUI screen>
+
+sudo modprobe /lib/modules/6.8.0-58-generic/updates/dkms/redfs.ko  ---> dynamic register redfs kernel into system
+lsmod | grep redfs
+sudo mv /dev/redfs /dev/redfs.old
+sudo mknod /dev/redfs c 10 120  ---> create device file
+sudo chmod 600 /dev/redfs
+lsmod | grep redfs
+```
+
+Check info of redfs:
+```
+modinfo redfs ----> get detail module info about redfs
+```
+Mount new created dataset:
+```
+sudo mount -t redfs <dataset> [-o tenant=<"tenant/subtenant">] /mount_point
+```
+
+Create volume:
+```
+redcli volume create vol1 -C 10G -N -t test(tenant name)
+redcli nvmf subsystem list ---> display subsystem info
+
+┌────────────────────┬─────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│   SUBSYSTEM NAME   │  HOST NAME  │                                      NQN                                      │
+├────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────┤
+│ t17.s17d17.vol1.ac │ llu-agent-1 │ nqn.2025-04.com.ddn.red.ten17.sub17:uuid:ac6dc7bf-d20a-4396-9323-37c3042634b1 │
+└────────────────────┴─────────────┴───────────────────────────────────────────────────────────────────────────────┘
+redcli volume show vol1
+6:38AM INF Auto Selecting cluster: cluster1
+6:38AM INF Auto Selecting tenant: test
+6:38AM INF Auto Selecting subtenant: test
+6:38AM INF Auto Selecting dataset: testd
+┌─────────────┬──────────────────────────────────────┬─────────┬────────────┬──────────┬──────────────────┬─────────────┬────────────────────┬──────────────────┬───────────────┐
+│ VOLUME NAME │                 UUID                 │ NBLOCKS │ BLOCK SIZE │ CAPACITY │        WWN       │    XATTRS   │      SUBSYSTEM     │      EXPORT      │               │
+├─────────────┼──────────────────────────────────────┼─────────┼────────────┼──────────┼──────────────────┼─────┬───────┼────────────────────┼──────┬───────────┼───────────────┤
+│             │                                      │         │            │          │                  │ KEY │ VALUE │                    │ TYPE │ TRANSPORT │  INSTANCE IP  │
+├─────────────┼──────────────────────────────────────┼─────────┼────────────┼──────────┼──────────────────┼─────┼───────┼────────────────────┼──────┼───────────┼───────────────┤
+│        vol1 │ 1a447015-163d-476a-a0c3-830db2dcb613 │ 2441407 │       4096 │    10 GB │ 23e30001fff51781 │     │       │ t17.s17d17.vol1.ac │ NVMF │       TCP │ 172.25.96.253 │
+└─────────────┴──────────────────────────────────────┴─────────┴────────────┴──────────┴──────────────────┴─────┴───────┴────────────────────┴──────┴───────────┴───────────────┘
+```
+
+Mount subsystem:
+```
+sudo -E redcli nvmf mount t17.s17d17.vol1.ac
+sudo nvme list
+sudo mkfs -t ext4 /dev/nvme0n1 ---> create a file system on the device
+
+mkdir /tmp/redvol1
+sudo mount /dev/nvme0n1 /tmp/redvol1
+sudo chmod 777 /tmp/redvol1
+```
+
+* Note:
+1. Guidance to start `kubert` - <a>https://ime-ddn.atlassian.net/wiki/spaces/RED/pages/4390925/kubert+-+Getting+Started</a>
+2.
+
+
+## Guide to setup xfstest
+1. pre-requisites
+```
+sudo apt-get update
+sudo apt-get install acl attr automake bc dbench dump e2fsprogs fio gawk \
+        gcc git indent libacl1-dev libaio-dev libcap-dev libgdbm-dev libtool \
+        libtool-bin liburing-dev libuuid1 lvm2 make psmisc python3 quota sed \
+        uuid-dev uuid-runtime xfsprogs linux-headers-$(uname -r) sqlite3 \
+        libgdbm-compat-dev
+sudo apt-get install exfatprogs f2fs-tools ocfs2-tools udftools xfsdump \
+        xfslibs-dev
+
+```
+2. Build and install test, libs and utils
+--------------------------------------
+```
+$ git clone git@github.red.datadirectnet.com:lyue/xfstests.git
+$ cd xfstests
+$ make
+$ sudo make instal
+```
+
+3. export environment
+```
+cp ~/xfstests/local.config.example local.config
+vi local.config
+
+export TEST_DEV=testd
+export TEST_DIR=/mnt/testd
+export SCRATCH_DEV=scratch
+export SCRATCH_MNT=/mnt/scratch
+
+```
+
+```
+export REDFS_ALL_DIO=false
+export REDFS_ENABLE_META_CACHE=true
+export REDFS_INODE_INVAL_ON_WRITE=true
+export REDFS_ENTRY_EXPIRE_ONLY=true
+
+```
+
+4. config shell script
+```
+cat /sbin/redfs.sh
+#!/bin/sh
+mount $@ >/dev/null 2>&1
+```
+
+```
+cat /sbin/mount.redfs.redfs
+#!/bin/bash
+
+dev="$1"
+shift
+mnt="$1"
+shift
+# -o
+shift
+mntopts="$1"
+shift
+
+server=$(echo "$RED_SERVER" | cut -d ',' -f 1)
+
+if ( echo "$mntopts" | grep -q remount ) ; then
+	exec mount -i "$dev" "$mnt" -o "$mntopts"
+fi
+
+echo "Running: redfs ${EXTRA_BIN_OPTIONS} -o fsname=$dev,dev -D ${source} ${mnt}  -o '$mntopts' '$@'" >> /tmp/mount.txt
+
+#sudo -E redfs.sh ${EXTRA_BIN_OPTIONS}  -D ${source} ${mnt}  -o "$mntopts" "$@"
+
+sudo -E redfs.sh -t redfs $dev $mnt  -o "$mntopts"
+```
+
+cat local.config:
+```
+# Ideally define at least these 4 to match your environment
+# The first 2 are required.
+# See README for other variables which can be set.
+#
+# Note: SCRATCH_DEV >will< get overwritten!
+
+export TEST_DEV=testd
+export TEST_DIR=/mnt/testd
+export SCRATCH_DEV=scratch
+export SCRATCH_MNT=/mnt/scratch
+export DEVICE_MOUNT_PREFIX="clus_20250528_134259/red_xfstest/red_xfstest/"
+export TEST_MNT_DEV=clus_20250528_134259/red_xfstest/red_xfstest/testd
+export SCRATCH_MNT_DEV=clus_20250528_134259/red_xfstest/red_xfstest/scratch
+
+export TEST_LOGDEV=tlog
+export TEST_LOG_MNT=/mnt/tlog
+export SCRATCH_LOGDEV=slog
+export SCRATCH_LOG_MNT=/mnt/slog
+export TEST_LOG_MNT_DEV=clus_20250528_134259/red_xfstest/red_xfstest/tlog
+export SCRATCH_LOG_MNT_DEV=clus_20250528_134259/red_xfstest/red_xfstest/slog
+
+export FSTYP=redfs
+export REDFS_SUBTYP=.redfs
+export MOUNT_OPTIONS=""
+export TEST_FS_MOUNT_OPTS=""
+
+export EXTRA_BIN_OPTIONS=""
+```
+
+
+Usage pytest:
+
+---- >3 agents + 1 client:
+```
+pytest test/automation/cli/testSuite/cluster_deployment/test_cluster_deployment.py --red_hosts 'llu-agent-1.virts.h8.redlab.datadirectnet.com','llu-agent-2.virts.h8.redlab.datadirectnet.com','llu-agent-4.virts.h8.redlab.datadirectnet.com','llu-agent-5.virts.h8.redlab.datadirectnet.com' --log_folder "/nfs_home/llu/xfstest_logs" --red_clients llu-client-3.virts.h8.redlab.datadirectnet.com -vs --red_repo /nfs_home/llu/src/red --test_repo /nfs_home/llu/20250616/test/ --red_pkgs /gha/red/release_build/788f8fac-engr_4437102-1532/git/red-pkgs/ --red_image_tag 2.2.2-beta.23987_amd64-engr --host_type vm-bm --md-report --setup_required --preserve_env
+
+pytest cli/testSuite/redfs_posix/xfstest/test_redfs_posix.py --red_clients 'llu-client-3.virts.h8.redlab.datadirectnet.com' --red_hosts 'llu-agent-1.virts.h8.redlab.datadirectnet.com','llu-agent-2.virts.h8.redlab.datadirectnet.com','llu-agent-3.virts.h8.redlab.datadirectnet.com'  -vs --log_folder "/nfs_home/llu/xfstest_logs" --test_repo /nfs_home/llu/src/test --host_type vm-bm --md-report --dev_mode
+
+pytest cli/testSuite/redfs_posix/xfstest/test_redfs_posix.py --red_clients 'llu-client-3.virts.h8.redlab.datadirectnet.com' --red_hosts 'llu-agent-1.virts.h8.redlab.datadirectnet.com','llu-agent-2.virts.h8.redlab.datadirectnet.com','llu-agent-4.virts.h8.redlab.datadirectnet.com','llu-agent-5.virts.h8.redlab.datadirectnet.com' -vs --log_folder "/nfs_home/llu/xfstest_logs" --test_repo /nfs_home/llu/20250616/test --host_type vm-bm --md-report --dev_mode
+
+```
+
+---- 1 client + 1 agent:
+```
+pytest test/automation/cli/testSuite/cluster_deployment/test_cluster_deployment.py --red_hosts 'llu-agent-3.virts.h8.redlab.datadirectnet.com' --log_folder "/nfs_home/llu/xfstest_logs" --red_clients llu-client-3.virts.h8.redlab.datadirectnet.com -vs --red_repo /nfs_home/llu/src/red --test_repo /nfs_home/llu/src/test --red_pkgs /gha/red/release_build/e22e237c-engr_3900178-1416/git/red-pkgs/ --red_image_tag 2.2.0-beta.23094_amd64-engr --host_type vm-bm --md-report --setup_required --preserve_env
+
+pytest cli/testSuite/redfs_posix/xfstest/test_redfs_posix.py --red_hosts llu-agent-3.virts.h8.redlab.datadirectnet.com --red_clients llu-client-3.virts.h8.redlab.datadirectnet.com -vs --log_folder "/nfs_home/llu/xfstest_logs" --test_repo /nfs_home/llu/src/test --host_type vm-bm --md-report --dev_mode
+```
+
+Enable trace:
+```
+
+#agenttrace.config
+ps aux |grep redfs
+export RED_JRPC_USE_TLS=0
+redcli client list
+redcli trace show
+redcli trace set fmtoption class true
+redcli trace set action -A all -s 0,1,2,3,4,5
+redcli trace set stream -n 8388608 -x -y 2 -F /var/log/red/trace -u
+redcli trace show
+
+
+red_trace = {"actions":[{"class":["tds_clnt","tds","dlm","redfs_client"],"stream":[0,1,2,3,4,5], "wrap":[6,7]}], "stream":{"enable":true}}
+
+RED_TRACE='{"actions":[{"class":["tds_clnt","tds","dlm","redfs_client"],"stream":[0,1,2,3,4,5],"wrap":[6,7]}],"stream":{"enable":true},"wrap":{"fmt_on_exit":true}}'
+
+RED_TRACE='{"actions":[{"class":["dlm","redfs_client"],"stream":[0,1,2,3,4,5],"wrap":[6,7]}],"stream":{"enable":true},"wrap":{"fmt_on_exit":true}}'
+
+ ps aux |grep redfs
+ export RED_JRPC_USE_TLS=0
+ sudo -E /usr/bin/redfs -oallow_other -D test /mnt/test
+ redcli client list
+ redcli trace show -C /usr/bin/redfs@lyue-client-1
+ redcli trace set fmtoption class true -C /usr/bin/redfs@lyue-client-1
+ redcli trace set action -A all -s 0,1,2,3,4,5 -C /usr/bin/redfs@lyue-client-1
+ redcli trace set stream -n 8388608 -x -y 2 -F /var/log/red/trace -u -C /usr/bin/redfs@lyue-client-1
+ redcli trace show -C /usr/bin/redfs@lyue-client-1
+```
+
+
+=============== when ssh state of vm is false ========
+```
+sudo sed -i 's|/24\b|/23|g' /etc/netplan/50-cloud-init.yaml && sudo netplan apply
+```
+
+
+++++++++++++++++ utilities for xfstest ++++++++++++++++
+```
+#get pointed test case list
+    #testcase id should be listed as : "001, 002" in 'conf/tc.list' file
+    def read_target_tc_ids(self):
+        """Read test case list from tc.list to get target execution tc
+
+        Returns:
+            joined xfstest case id into str by ' '
+        """
+        pointed_tc_file_path = os.path.join(self.script_dir, 'conf/tc.list')
+        if not os.path.exists(pointed_tc_file_path):
+            return ''
+
+        tc_id_pattern = r'^\d{3}$'
+
+        target_tcs = []
+        with open(pointed_tc_file_path, 'r', encoding='utf-8') as f:
+            for line in f :
+                if bool(re.match(tc_id_pattern, line)):
+                    tc_id = f"tests/generic/{line.strip()}"
+                    target_tcs.append(tc_id)
+
+        if len(target_tcs) > 0:
+            sub_cmd = " ".join(target_tcs)
+            self.logger.info(f"Following test cases : '{sub_cmd}' will be executed.")
+            return sub_cmd
+
+        self.logger.info("No matched single test case would be listed and executed, ignore.")
+        return ''
+```
