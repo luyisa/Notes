@@ -1,0 +1,76 @@
+ASAN_OPTIONS 是 AddressSanitizer (ASan) 工具的环境变量配置参数，用于控制其运行时行为。你提供的这些参数主要用于调整内存错误的处理方式、核心转储（coredump）生成、栈跟踪等功能，具体解释如下：
+各参数含义及作用：
+** abort_on_error=1
+作用：当 ASan 检测到内存错误（如缓冲区溢出、use-after-free 等）时，立即调用 abort() 终止程序。
+默认值：0（默认情况下，ASan 会输出错误信息后继续运行，可能导致后续不可预测行为）。
+适用场景：希望错误发生时立即终止程序，方便捕获现场（如生成 coredump）。
+** disable_coredump=0
+作用：允许在程序崩溃时生成核心转储文件（coredump）。
+默认值：1（ASan 默认禁用 coredump，因为其内部内存布局可能导致 coredump 过大）。
+适用场景：需要通过 coredump 深入分析错误原因（配合 abort_on_error=1 使用，确保崩溃时触发 coredump）。
+** unmap_shadow_on_exit=1
+作用：程序退出时，释放 ASan 用于检测的 “影子内存”（shadow memory）。
+默认值：0（默认不释放，可能加快程序退出速度）。
+适用场景：需要严格释放内存（如长期运行的服务），避免退出时残留未释放的内存区域（对调试影响较小）。
+** allow_addr2line=true
+作用：允许 ASan 使用 addr2line 工具将内存地址转换为源代码文件名和行号，便于在错误信息中显示具体位置。
+默认值：true（通常默认启用）。
+作用：让错误日志更易读，直接定位到代码中的问题位置（需确保编译时包含调试信息 -g）。
+** use_sigaltstack=0
+作用：禁用 ASan 使用 “备用信号栈”（alternative signal stack）处理信号。
+默认值：1（默认启用，用于避免信号处理时栈溢出）。
+适用场景：某些环境下备用信号栈可能导致兼容性问题（如嵌入式系统），禁用后使用常规栈处理信号。
+** detect_stack_use_after_return=0
+作用：禁用 “栈上内存返回后使用”（use-after-return）的检测。
+默认值：0（默认关闭，因为启用会增加内存开销和性能损耗）。
+说明：若设为 1，ASan 会检测函数返回后继续使用其栈上局部变量的错误，但会显著影响程序性能，通常仅在特定调试场景启用。
+
+内存错误发生时立即终止程序（abort_on_error=1）；
+生成 coredump 供后续分析（disable_coredump=0）；
+确保错误日志显示源代码位置（allow_addr2line=true）；
+关闭部分非必要检测（如 detect_stack_use_after_return=0）以减少性能损耗。
+
+=========================================================================================================================
+LSAN_OPTIONS 是 LeakSanitizer（LSan）工具的环境变量配置参数，用于控制内存泄漏检测的行为。LeakSanitizer 是 LLVM/Clang 和 GCC 编译器提供的内存泄漏检测工具，常与 AddressSanitizer（ASan）配合使用（ASan 已集成 LSan，可通过 -fsanitize=address 同时启用内存错误和泄漏检测）。
+
+以下是 LSAN_OPTIONS 常见参数及作用：
+核心参数说明：
+** detect_leaks=1
+作用：启用内存泄漏检测（默认值为 1）。
+若设为 0，则禁用 LSan，即使编译时启用了 fsanitize=address 也不会检测泄漏。
+** leak_check_at_exit=1
+作用：程序退出时自动执行内存泄漏检查（默认值为 1）。
+若设为 0，则不自动检查，需通过代码手动调用 __lsan_do_leak_check() 触发检查。
+** suppressions=<文件路径>
+作用：指定泄漏抑制文件（suppression file），用于忽略已知的、可接受的泄漏（如第三方库中的泄漏）。
+示例：LSAN_OPTIONS=suppressions=leak_suppr.txt
+抑制文件格式：每行指定一个需要忽略的泄漏模式，例如：
+txt
+leak:libthirdparty.so  # 忽略来自 libthirdparty.so 的所有泄漏
+leak:my_function       # 忽略在 my_function 中分配的泄漏
+
+** max_leaks=<数字>
+作用：设置允许的最大泄漏数量（默认无限制）。
+若检测到的泄漏数超过该值，LSan 会以非零状态码退出（便于 CI 等场景判断是否有新泄漏）。
+** exitcode=<数字>
+作用：指定检测到泄漏时的退出状态码（默认值为 23）。
+用于区分泄漏导致的退出与其他错误（如 ASan 检测到的内存错误）。
+** print_suppressions=1
+作用：输出被抑制的泄漏信息（默认值为 0，不输出）。
+用于调试抑制规则是否生效，确认哪些泄漏被成功忽略。
+** report_objects=1
+作用：在泄漏报告中显示每个泄漏对象的具体内容（如前几个字节，默认值为 0）。
+帮助识别泄漏内存的类型或内容（例如字符串、结构体等）。
+** use_unaligned=0
+作用：禁用对未对齐内存分配的支持（默认值为 1，启用）。
+某些特殊场景下（如底层硬件不支持未对齐访问）可能需要关闭。
+使用示例：
+bash
+# 启用泄漏检测，指定抑制文件，退出时检查，最多允许1个泄漏
+```
+  LSAN_OPTIONS="detect_leaks=1:suppressions=leaks.txt:leak_check_at_exit=1:max_leaks=1" ./my_program
+```
+注意：
+LSan 通常与 ASan 一起使用（无需单独编译选项），但也可通过 -fsanitize=leak 单独启用（功能有限）。
+启用 LSan 会增加程序的内存占用和运行时间（约 2x-3x 开销），建议仅在测试环境使用。
+部分参数（如 suppressions）的格式与 ASan 兼容，可共用抑制文件。
